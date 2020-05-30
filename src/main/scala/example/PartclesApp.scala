@@ -11,7 +11,7 @@ import scala.util.Random
 
 
 @JSExport
-object Particles {
+object ParticlesApp {
   @JSExport
   def main(canvas: html.Canvas): Unit = {
     /*setup*/
@@ -59,8 +59,7 @@ object Particles {
       drawCfg(cfg)
     }
 
-    //dom.window.setInterval(run _, 20)
-    dom.window.setInterval(run _, 2)
+    dom.window.setInterval(run _, 20)
   }
 }
 
@@ -75,7 +74,7 @@ case class Point(x: Int, y: Int) {
 
 
 trait Particle {
-  def transform(): Particle
+  //def transform(): Particle
   def transform(cfg: Configuration): Configuration = cfg
   def energy(cfg: Configuration): Double = cfg.ps.filter(p => p.point == this.point).size.toDouble
   def point: Point
@@ -93,7 +92,7 @@ case class StaticParticle(point: Point,  id: String = UUID.randomUUID().toString
 case class ActiveParticle(point: Point, id: String = UUID.randomUUID().toString) extends Particle {
   def step = 2
   def kind = "active"
-  def transform(): ActiveParticle = {
+  def float(): ActiveParticle = {
     def nextInt(n: Int): Int = Random.nextInt(n) * (if (Random.nextBoolean())  -1 else 1)
     val newPoint = Point(this.point.x + nextInt(step), this.point.y + nextInt(step))
     copy(point = newPoint)
@@ -102,7 +101,7 @@ case class ActiveParticle(point: Point, id: String = UUID.randomUUID().toString)
   override def transform(cfg: Configuration): Configuration = {
     val otherParticles = cfg.ps.filterNot(p => p.id == this.id)
     assert(otherParticles.size == cfg.ps.size - 1)
-    cfg.copy(ps = otherParticles + this.transform())
+    cfg.copy(ps = otherParticles + this.float())
   }
 }
 
@@ -110,7 +109,7 @@ case class ActiveParticle(point: Point, id: String = UUID.randomUUID().toString)
 case class BindingParticle(point: Point, id: String = UUID.randomUUID().toString) extends Particle {
   def step = 2
   def kind = "binding"
-  def transform(): BindingParticle = {
+  def float(): BindingParticle = {
     def nextInt(n: Int): Int = Random.nextInt(n) * (if (Random.nextBoolean())  -1 else 1)
     val newPoint = Point(this.point.x + nextInt(step), this.point.y + nextInt(step))
     copy(point = newPoint)
@@ -130,7 +129,7 @@ case class BindingParticle(point: Point, id: String = UUID.randomUUID().toString
       val allOtherParticles = cfg.ps.filterNot(p => Set(this .id, other.id).contains(p.id))
       Configuration(allOtherParticles + me + other)
     } else {// move
-      cfg.copy(ps = otherParticles + this.transform())
+      cfg.copy(ps = otherParticles + this.float())
     }
     newCfg
   }
@@ -139,7 +138,9 @@ case class BindingParticle(point: Point, id: String = UUID.randomUUID().toString
 case class BondedParticle(point: Point, otherId: String, id: String = UUID.randomUUID().toString) extends Particle {
   def step = 2
   def kind = "bonded"
-  def transform(): BondedParticle = {
+  def bondLength = 2
+
+  def float(): BondedParticle = {
     def nextInt(n: Int): Int = Random.nextInt(n) * (if (Random.nextBoolean())  -1 else 1)
     val newPoint = Point(this.point.x + nextInt(step), this.point.y + nextInt(step))
     copy(point = newPoint)
@@ -149,38 +150,29 @@ case class BondedParticle(point: Point, otherId: String, id: String = UUID.rando
     val bondParticles = cfg.ps.filter(p => p.id == this.otherId)
     assert(bondParticles.size == 1)
     val distance = (point - bondParticles.head.point).norm(1)
-    val bondEnergy = if (distance < 5) 0 else 1
+    val bondEnergy = if (distance < bondLength) 0 else 1
     super.energy(cfg) + bondEnergy
   }
   override def transform(cfg: Configuration): Configuration = {
     val otherParticles = cfg.ps.filterNot(p => p.id == this.id)
     assert(otherParticles.size == cfg.ps.size - 1)
-    cfg.copy(ps = otherParticles + this.transform())
+    cfg.copy(ps = otherParticles + this.float())
   }
 }
 
 case class Configuration(ps: Set[Particle]) {
-//  def transform(): Configuration = {
-//      val activeParticles: Set[Particle] = ps.filter(p => !p.isInstanceOf[StaticParticle])
-//      val randomParticle: Particle = activeParticles.toList(Random.nextInt(activeParticles.size))
-//      val newCfg = randomParticle.transform(this)
-//      if (newCfg.energy() <= this.energy()) newCfg else this
-//  }
-
-
   def transform(): Configuration = {
-    def transform1(): Configuration = {
-      val activeParticles: Set[Particle] = ps.filter(p => !p.isInstanceOf[StaticParticle])
+    def update(cfg: Configuration): Configuration = {
+      val activeParticles: Set[Particle] = cfg.ps.filter(p => !p.isInstanceOf[StaticParticle])
       val randomParticle: Particle = activeParticles.toList(Random.nextInt(activeParticles.size))
-      val newCfg = randomParticle.transform(this)
-      if (newCfg.energy() <= this.energy()) newCfg else this
+      val newCfg = randomParticle.transform(cfg)
+      if (newCfg.energy <= cfg.energy) newCfg else cfg
     }
 
-    var c = this
-    for (i <- 0 to 1) {
-      c = transform1()
-    }
-    c
+    // do update iters times
+    val iters = ps.filter(!_.isInstanceOf[StaticParticle]).size
+    (1 to iters).foldLeft(this)((c, _) => update(c))
+
   }
 
   def energy(): Double = ps.foldLeft(0.0)((e, p) => e + p.energy(this))
