@@ -23,7 +23,7 @@ object ParticlesApp {
 
     //var cfg = Configuration(Set(StaticParticle(Point(100, 100)), ActiveParticle(Point(200, 100))))
     val particles = Configuration.squareStaticMembrane(30)
-    val ap = ActiveParticle(Point(1, 1))
+    val ap = FloatingParticle(Point(1, 1))
 //    val sp = StaticParticle(Point(10, 10))
 //    val b0 = BondedParticle(Point(16, 15), sp.id)
 //    val (b1, b2) = Bind(BindingParticle(Point(10, 10)), BindingParticle(Point(11, 10)))
@@ -36,14 +36,14 @@ object ParticlesApp {
 
 
     //var cfg = Configuration(particles.ps + ap)
-    //var cfg = Configuration(particles.ps + bi1 + bi2 + ap)
-    var cfg = Configuration(particles.ps + bi1 + bi2 + bi3 + bi4 + bi5 + bi6 + ap)
+    var cfg = Configuration(particles.ps + bi1 + bi2 + ap)
+    //var cfg = Configuration(particles.ps + bi1 + bi2 + bi3 + bi4 + bi5 + bi6 + ap)
     //var cfg = Configuration(particles.ps + bi1 + bi2 + ap + b1 + b2 + b0 + sp)
 
     def drawCfg(cg: Configuration): Unit = {
       renderer.clearRect(0, 0, canvas.width, canvas.height)
 
-      for (p: Particle <- cfg.ps) {
+      for (p: AbstractParticle <- cfg.ps) {
         if (p.kind == "static") renderer.fillStyle = "black"
         else if (p.kind == "active") renderer.fillStyle = "red"
         else if (p.kind == "binding") renderer.fillStyle = "orange"
@@ -63,108 +63,13 @@ object ParticlesApp {
   }
 }
 
-case class Point(x: Int, y: Int) {
-  def +(p: Point) = Point(x + p.x, y + p.y)
-  def -(p: Point) = Point(x - p.x, y - p.y)
-  def /(d: Int) = Point(x / d, y / d)
-  def norm(p: Int): Double = {
-    Math.pow(Math.pow(Math.abs(x), p) + Math.pow(Math.abs(y), p), 1/p)
-  }
-}
 
 
-trait Particle {
-  //def transform(): Particle
-  def transform(cfg: Configuration): Configuration = cfg
-  def energy(cfg: Configuration): Double = cfg.ps.filter(p => p.point == this.point).size.toDouble
-  def point: Point
-  def kind: String
-  def id: String
-}
-
-case class StaticParticle(point: Point,  id: String = UUID.randomUUID().toString) extends Particle {
-  def kind = "static"
-  def transform(): StaticParticle = {
-    this.copy()
-  }
-}
-
-case class ActiveParticle(point: Point, id: String = UUID.randomUUID().toString) extends Particle {
-  def step = 2
-  def kind = "active"
-  def float(): ActiveParticle = {
-    def nextInt(n: Int): Int = Random.nextInt(n) * (if (Random.nextBoolean())  -1 else 1)
-    val newPoint = Point(this.point.x + nextInt(step), this.point.y + nextInt(step))
-    copy(point = newPoint)
-  }
-
-  override def transform(cfg: Configuration): Configuration = {
-    val otherParticles = cfg.ps.filterNot(p => p.id == this.id)
-    assert(otherParticles.size == cfg.ps.size - 1)
-    cfg.copy(ps = otherParticles + this.float())
-  }
-}
-
-
-case class BindingParticle(point: Point, id: String = UUID.randomUUID().toString) extends Particle {
-  def step = 2
-  def kind = "binding"
-  def float(): BindingParticle = {
-    def nextInt(n: Int): Int = Random.nextInt(n) * (if (Random.nextBoolean())  -1 else 1)
-    val newPoint = Point(this.point.x + nextInt(step), this.point.y + nextInt(step))
-    copy(point = newPoint)
-  }
-
-  override def transform(cfg: Configuration): Configuration = {
-    val otherParticles = cfg.ps.filterNot(p => p.id == this.id)
-
-    val otherBindingNearbyParticles = otherParticles
-      .filter(p => p.isInstanceOf[BindingParticle])
-      .filter(p => (p.point - this.point).norm(1) < 2.0)
-
-    val newCfg = if (!otherBindingNearbyParticles.isEmpty) {// bind
-      val randIdx = Random.nextInt(otherBindingNearbyParticles.size)
-      val randOtherBindingParticle = otherBindingNearbyParticles.toList(randIdx).asInstanceOf[BindingParticle]
-      val (me, other) = Bind(this, randOtherBindingParticle)
-      val allOtherParticles = cfg.ps.filterNot(p => Set(this .id, other.id).contains(p.id))
-      Configuration(allOtherParticles + me + other)
-    } else {// move
-      cfg.copy(ps = otherParticles + this.float())
-    }
-    newCfg
-  }
-}
-
-case class BondedParticle(point: Point, otherId: String, id: String = UUID.randomUUID().toString) extends Particle {
-  def step = 2
-  def kind = "bonded"
-  def bondLength = 2
-
-  def float(): BondedParticle = {
-    def nextInt(n: Int): Int = Random.nextInt(n) * (if (Random.nextBoolean())  -1 else 1)
-    val newPoint = Point(this.point.x + nextInt(step), this.point.y + nextInt(step))
-    copy(point = newPoint)
-  }
-
-  override def energy(cfg: Configuration): Double = {
-    val bondParticles = cfg.ps.filter(p => p.id == this.otherId)
-    assert(bondParticles.size == 1)
-    val distance = (point - bondParticles.head.point).norm(1)
-    val bondEnergy = if (distance < bondLength) 0 else 1
-    super.energy(cfg) + bondEnergy
-  }
-  override def transform(cfg: Configuration): Configuration = {
-    val otherParticles = cfg.ps.filterNot(p => p.id == this.id)
-    assert(otherParticles.size == cfg.ps.size - 1)
-    cfg.copy(ps = otherParticles + this.float())
-  }
-}
-
-case class Configuration(ps: Set[Particle]) {
+case class Configuration(ps: Set[AbstractParticle]) {
   def transform(): Configuration = {
     def update(cfg: Configuration): Configuration = {
-      val activeParticles: Set[Particle] = cfg.ps.filter(p => !p.isInstanceOf[StaticParticle])
-      val randomParticle: Particle = activeParticles.toList(Random.nextInt(activeParticles.size))
+      val activeParticles: Set[AbstractParticle] = cfg.ps.filter(p => !p.isInstanceOf[StaticParticle])
+      val randomParticle: AbstractParticle = activeParticles.toList(Random.nextInt(activeParticles.size))
       val newCfg = randomParticle.transform(cfg)
       if (newCfg.energy <= cfg.energy) newCfg else cfg
     }
@@ -180,7 +85,7 @@ case class Configuration(ps: Set[Particle]) {
 
 object Configuration {
   def squareStaticMembrane(sideSize: Int): Configuration = {
-    var ps = Set.empty[Particle]
+    var ps = Set.empty[AbstractParticle]
     for {i <- 0 to sideSize -1
          j <- 0 to sideSize -1 } {
 
